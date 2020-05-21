@@ -1,7 +1,7 @@
 # Bayesian NBA Analysis
 ## Predicting Playoff teams with Bayesian Inference
 
-This analysis looks at different metrics of NBA playoff teams measured throughout an NBA season, and builds a model to help predict whether an NBA team is in the playoffs or not.
+This analysis looks at different metrics of NBA playoff teams measured throughout an NBA season, and builds a model to help predict whether an NBA team is in the playoffs or not. The final model predicts playoff teams with 73% accuracy.
 
 The data for this analysis were scraped from the ESPN website and contains regular-season information from 10 seasons (2010-2019). 
 * The script for scraping the data can be found in the "Scripts Folder".
