@@ -1,5 +1,5 @@
 # Bayesian NBA Analysis
-## Predicting BA playoff teams with Bayesian Inference
+## Predicting Playoff teams with Bayesian Inference
 
 This analysis looks at different metrics of NBA playoff teams measured throughout an NBA season, and builds a model to help predict whether an NBA team is in the playoffs or not.
 
