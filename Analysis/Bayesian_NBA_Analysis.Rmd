@@ -1,8 +1,5 @@
 ---
 title: "Prediciting Playoff Appearances of NBA Teams"
-subtitle: "APSTA 2123: Final Project"
-author: "Bilal Waheed"
-date: "5/16/2020"
 output: 
   pdf_document: 
     number_sections: yes
