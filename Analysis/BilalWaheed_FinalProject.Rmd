@@ -1,0 +1,278 @@
+---
+title: "Prediciting Playoff Appearances of NBA Teams"
+subtitle: "APSTA 2123: Final Project"
+author: "Bilal Waheed"
+date: "5/16/2020"
+output: 
+  pdf_document: 
+    number_sections: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The National Basketball Association (NBA) is a men’s professional basketball league in North America. There are 30 teams within the league, each playing 82 games in a season. 16 teams can qualify to be in the playoffs, which extend the number of games played for those teams. Like many sports, the NBA maintains records of numerous metrics on a team and player basis. These metrics help understand the overall performance of each team.
+
+In this analysis, we will be predicting which NBA team is likely to enter the NBA Playoffs based on aggregrate metrics. Examples include total points scored per game, total steals per game, free throw percentage, and offensive rebound percentage. 
+
+# NBA Data Overview
+
+The data were scraped from the ESPN website and consist of 30 teams over 10 seasons (2010-2019). The data contain 300 observations with several metrics for each team, and an indicator for whether or not that team made the playoffs in that season. Independence across teams and years is assumed.
+
+For this analysis, the data are split into training and test sets, with the training set consisting of seasons 2010-2018, and the test set being the 2019 season. We will fit a model on the training data, and predict on the test data to evaluate performance.
+
+Below is a sample of the dataset to understand and visualize its characteristics:
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(brms)
+library(haven)
+library(tidyverse)
+library(bayesplot)
+nba <- read.csv("/Users/mbp/Documents/NYU/APSTA 2123 - Bayesian Inference/Final Project/NBA_data.csv")
+nbatrain <-nba[31:300,]
+nbatest<-nba[1:30,]
+```
+
+```{r echo=FALSE}
+kableExtra::kable(nba[1:5,2:9], format = "markdown")
+kableExtra::kable(nba[1:5, 10:22], format = "markdown")
+```
+
+\pagebreak
+
+## Generative Model
+
+We will use a bernoulli data generating process to model the probability of a team being a playoff team or not. The model will incorporate the following variables as predictors:
+
+* `FG_percent: Total number of shots scored divided by total shots attempted.`
+* `REB: Total rebounds per game.`
+* `AST: Total assists per game.`
+
+These variables are basic metrics that assess overall team strength: `FG_percent` measures a team's scoring efficiency, `REB` measures how well can a team rebound the ball and not give the opposing team second-chance opportunities, and `AST` measures how well the team is passing and utilizing each member of the team.
+
+The data are modeled in the following form: 
+
+$$logit(P_{Playoffs}) = \beta_0 + \beta_1FGpercent + \beta_2REB + \beta_3AST$$
+
+# Priors and Drawing from Prior Predictive Distribution
+
+## Setting Priors
+
+First we will determine the priors for each parameter of the model. We will use the `get_prior` function to see the coefficient names. This function will also help to give a starting point for setting prior distributions on the parameters. Results are shown below:
+
+```{r echo=FALSE}
+kableExtra::kable(get_prior(Playoffs ~ FG_percent + REB + AST, data = nbatrain, family = bernoulli), format = "markdown")
+```
+
+Based on the output, we will use Gaussian priors on the coefficients of the predictors. This is reasonable because, due to the dynamic structure and nature of NBA teams, a change in any metric could result in an increased or decreased likelihood of playoff appearance.
+
+* **Field-goal percentage (FGP)**: Higher FGP generally corresponds to better shot selection, and more points, but that is not always the case. Therefore, this prior will be set to $N \sim (0.20, 0.40)$ to allow for the possibility that FGP could reduce a team's chance to be a playoff team.
+
+* **Assists (AST)**: It is reasonable to believe that the higher assists could relate to overall team chemistry and ball-movement, which would increase a team's likelihood of being a playoff team. The prior on this will be set to $N \sim (0.20, 0.20)$.
+
+* **Total rebounds (REB)**: This is a trickier metric and does not necessarily correspond to more points scored. This prior will be set wider to $N \sim (0, 0.50)$
+
+\pagebreak
+
+## Prior Distribution Draws
+
+After setting these priors, we will now draw 4000 samples from the prior predictive distribution and examine the density plots of the prior draws to see if our priors are reasonable. 
+
+The code to set the priors and draw from the prior predictive distirbution is provided below:
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, results="hide"}
+# Set priors:
+priors <- prior(normal(0, 1), class = "Intercept") + 
+  prior(normal(.20, 0.40), coef = "FG_percent") +
+  prior(normal(0.20, 0.20), coef = "AST") +
+  prior(normal(0, 0.50), coef = "REB")
+
+# Create prior distributions:
+prior <- brm(Playoffs ~ FG_percent + REB + AST, data = nbatrain, family = bernoulli, 
+             prior = priors, sample_prior = "only")
+
+# Draw from prior distributions (4000 samples):
+ppd <- pp_expect(prior)
+```
+
+The density plots of the predicted outcome below provide two different perspectives on the prior predictive distribution: the left shows the average of 4,000 draws of the predicted probability of being in the playoffs for each team, and the right shows the total estimated percentage of teams being in the playoffs for each draw.
+
+```{r echo=FALSE}
+# Plot prior distribution:
+cols_df <- data.frame(colMeans = colMeans(ppd))
+rows_df <- data.frame(rowMeans= rowMeans(ppd))
+
+p1 <- ggplot(cols_df, aes (x = colMeans)) + 
+  geom_density(position = "identity", stat = "density") +
+  theme_minimal() + 
+  labs(title = "Density of Prior Draws", subtitle = "4000 samples", x = "Team Playoff Probability", y = "") +
+  xlim(0,1)
+
+p2 <- ggplot(rows_df, aes (x = rowMeans)) + 
+  geom_density(position = "identity", stat = "density") +
+  theme_minimal() + 
+  labs(title = "Density of Prior Draws", subtitle = "4000 samples", x = "Percentage of Teams in Playoffs", y = "") +
+  xlim(0,1)
+
+gridExtra::grid.arrange(p1, p2, ncol = 2, nrow = 1)
+```
+
+The prior predictive distribution shows that teams roughly have a 50% chance to make the playoffs, on average, with no team having exactly 0% or 100% chance. Additionally, on average, 50% of total teams will make the playoffs. These priors make sense, because every season there are 16 out of the 30 teams that make the playoffs.
+
+\pagebreak
+
+# Posterior Distribution: Conditioning on Observed Data
+
+Now that are priors are in good shape, we will examine the posterior distribution after conditioning on the observed data. The code and output are provided below.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, results = "hide"}
+# Posterior distribution:
+post <- update(prior, sample_prior = "no")
+
+# Draw from posterior distribution (4000 samples):
+post_draws <- pp_expect(post)
+```
+
+
+Shown below, after conditioning on the data, we can see adequate model convergence with Rhat values equal to 1.00 as well as large effective sample sizes. The updated parameter estimates are consistent with our prior beliefs about the effect of those variables. It is interesting to note that the estimate for `AST` is close to 0, indicating that higher assist values have little to no impact on the likelihood of being in the playoffs.
+
+```{r echo=FALSE}
+kableExtra::kable(round(summary(post)$fixed,2), format = "markdown")
+```
+
+The below density plots of the posterior distribution also show reasonable estimates of playoff probability. The plot of percentage of playoff teams has narrowed to include the range from approximately 0.45 to 0.60, with a mean right around 0.52. This is consistent with the actual data, because each season, there are exactly 16 out of the 30 teams (53.33%) that qualify for the playoffs.
+
+```{r echo=FALSE}
+# Plot posterior distribution:
+cols_df2 <- data.frame(colMeans = colMeans(post_draws))
+rows_df2 <- data.frame(rowMeans= rowMeans(post_draws))
+
+p3 <- ggplot(cols_df2, aes (x = colMeans)) + 
+  geom_density(position = "identity", stat = "density") +
+  theme_minimal() + 
+  labs(title = "Density of Posterior Draws", subtitle = "4000 samples", x = "Team Playoff Probability", y = "")
+
+p4 <- ggplot(rows_df2, aes (x = rowMeans)) + 
+  geom_density(position = "identity", stat = "density") +
+  theme_minimal() + 
+  labs(title = "Density of Posterior Draws", subtitle = "4000 samples", x = "Percentage of Teams in Playoffs", y = "")
+
+gridExtra::grid.arrange(p3, p4, ncol = 2, nrow = 1)
+```
+
+# Evaluating the model
+
+## Using the `loo` function
+
+To evaluate this model, we will utilize the `loo` function to look at different metrics. The expected log-predictive density (ELPD) is approximately -154.0, and the Pareto-k estimates are okay with values less than 0.5, indicating that the model is not sensitive to any observations in the dataset. 
+
+```{r echo=FALSE}
+kableExtra::kable(round(loo(post)$estimates,2), format = "markdown")
+```
+
+```{r echo=FALSE}
+plot(loo(post), label_points = TRUE)
+```
+
+\pagebreak
+
+## Checking model fit
+
+Next we will check the predicted values of the model compared to the actual training data. The ECDF plot below shows that the model is a decent fit to the data:
+
+```{r echo=FALSE}
+pp_check(post, type = "ecdf_overlay")
+```
+
+## Predictions on New Data
+
+The model seemed to perform well on the training data and predict outcomes effectively. We will now use this model to predict playoff appearances for the 2019 season (our test set).
+
+The code below shows that we will use our posterior distribution to predict playoff teams and then test accuracy: 
+
+```{r echo=TRUE}
+nbatest$preds <- ifelse(colMeans(posterior_predict(post, newdata = nbatest)) > 0.5,1,0)
+(sum(nbatest$Playoffs == nbatest$preds)/nrow(nbatest))
+```
+
+The results show that the model does not do an excellent job at predicting playoff appearances on new data, with an accuracy of less than 70%.
+
+\pagebreak
+
+# Alternative Model
+
+In the NBA, it is often preached that defense is the best offense, and that defense is the defining characteristic of a team that wins championships. The previous model gives some insight into what characteristics are common in playoff teams, but does not explain the data well, and misses a lot of variables that capture the intricacies of a team. 
+
+Let's extend this model to include additional variables. In this alternative model, we will include variables related to defensive characteristics of teams, to see if teams strong in defense have higher likelihoods of going to the playoffs. Similar to the previous model, we will use a bernoulli data generating process. However, the model will incorporate the following variables as predictors:
+
+* `FG_percent: Total number of shots scored divided by total shots attempted.`
+* `REB: Total rebounds per game.`
+* `AST: Total assists per game.`
+* `X3P_percent: Total number of 3-point shots scored divided by total 3-point shots attempted.`
+* `DR: Total defensive rebounds per game.`
+* `FTM: Total free-throws made per game.`
+* `TO: Total turnovers made per game.`
+* `STL: Total steals per game.`
+
+The model will now take on the form: $$logit(P_{Playoffs}) = \beta_0 + \beta_1FGpercent + \beta_2REB + \beta_3AST +\beta_43Ppercent + \beta_5DR + \beta_6FTM + \beta_7TO + \beta_8STL$$
+
+We will fit the following priors shown in the code below, and draw from the posterior distribution of the alternative model:
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, results="hide"}
+priors <- priors <- prior(normal(0, 1), class = "Intercept") + 
+  prior(normal(.20, 0.40), coef = "FG_percent") +
+  prior(normal(0.20, 0.40), coef = "X3P_percent") +
+  prior(normal(0.20, 0.20), coef = "AST") +
+  prior(normal(0, 0.40), coef = "REB")
+  prior(normal(0.20, 0.30), coef = "FTM") +
+  prior(normal(0.10, 0.20), coef = "DR") +
+  prior(normal(-0.50, 0.30), coef = "TO") +
+  prior(normal(0.30, 0.30), coef = "STL")
+  
+post_alt <- brm(Playoffs ~ FG_percent + REB + AST + X3P_percent + FTM + DR + TO + STL + PF, 
+                data = nbatrain, family = bernoulli(), prior = priors)
+```
+
+\pagebreak
+
+## Alternative Model Results
+
+The result of the model is interesting, and seemingly confirms the theory that defense makes a team better. The coefficients on defensive variables `DR`, `STL`, `TO`, and `PF` all show much better likelihoods of being in the playoffs when those respective stats are better. For example, the estimated coefficient on `TO` is `-0.52`, meaning that teams with very high turnovers per game have a much lower chance of being a playoff team, because having high turnovers is indicative of a team with poor ball-handling ability.
+
+```{r echo=FALSE}
+kableExtra::kable(round(summary(post_alt)$fixed,2), format = "markdown")
+```
+
+The plot below shows the updated posterior distribution of the impact on log-odds of playoff appearance by each predictor. It is apparent that defensive characteristics have a distribution corresponding to increasing log-odds.
+
+```{r echo=FALSE}
+post_alt_df <- data.frame(as.matrix(post_alt))
+mcmc_areas(post_alt_df[,2:10])
+```
+
+## Comparing to previous model
+
+Compared to the previous model, the ELPD is higher, indicating that it's a better model fit. Also, like the previous model, all Pareto-k estimates are okay with values less than 0.5.
+
+```{r echo=FALSE}
+loo_alt<- loo(post_alt)$estimates
+loo_alt_compare <- loo(post, post_alt)$diffs
+kableExtra::kable(as.matrix(round(loo_alt,2)), format = "markdown")
+kableExtra::kable(as.matrix(round(loo_alt_compare,2)), format = "markdown")
+```
+
+Evaluating the alternative model on the test data yields slightly better results than the previous model. The model predicts the out-of-sample test data with 73% accuracy.
+
+```{r}
+nbatest$preds_alt  <- ifelse(colMeans(posterior_predict(post_alt, newdata = nbatest))>0.5,1,0)
+sum(nbatest$Playoffs == nbatest$preds_alt)/nrow(nbatest)
+```
+
+# Conclusion
+
+Comparing both models, it is clear the alternative model with more predictors is the better model with more accurate predictions. Overall, the performance is decent, and the model could be used for practical purposes to determine if a team is likely to be a playoff team during the course of the season.
